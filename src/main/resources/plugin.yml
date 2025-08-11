@@ -1,0 +1,17 @@
+name: RelayPlugin
+version: '1.0-SNAPSHOT'
+main: yd.kingdom.relayPlugin.RelayPlugin
+api-version: '1.21'
+commands:
+  레드팀:
+    description: 레드팀으로 소속
+    usage: /레드팀
+  블루팀:
+    description: 블루팀으로 소속
+    usage: /블루팀
+  게임시작:
+    description: 팀 릴레이 게임 시작
+    usage: /게임시작
+  게임종료:
+    description: 팀 릴레이 게임 종료
+    usage: /게임종료
