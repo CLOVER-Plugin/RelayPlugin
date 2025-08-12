@@ -2,10 +2,10 @@ package yd.kingdom.relayPlugin.manager;
 
 import net.md_5.bungee.api.ChatMessageType;
 import net.md_5.bungee.api.chat.TextComponent;
-import org.bukkit.Bukkit;
-import org.bukkit.GameMode;
-import org.bukkit.Material;
-import org.bukkit.Sound;
+import org.bukkit.*;
+import org.bukkit.boss.BarColor;
+import org.bukkit.boss.BarStyle;
+import org.bukkit.boss.BossBar;
 import org.bukkit.command.CommandSender;
 import org.bukkit.entity.Player;
 import org.bukkit.inventory.ItemStack;
@@ -28,6 +28,7 @@ public class GameManager {
     private boolean running = false;
     private boolean finished = false;
     private TeamManager.Team winner = null;
+    private final Map<UUID, BossBar> bossBars = new HashMap<>();
 
     private final Map<TeamManager.Team, Integer> step = new EnumMap<>(TeamManager.Team.class);
     private final Map<TeamManager.Team, Long> startNano = new EnumMap<>(TeamManager.Team.class);
@@ -77,7 +78,7 @@ public class GameManager {
 
         applyModesForAll();
 
-        int period = Math.max(1, plugin.getConfig().getInt("actionbarPeriodTicks", 10));
+        int period = Math.max(1, plugin.getConfig().getInt("actionbarPeriodTicks", 2));
         actionBarTask = new BukkitRunnable() { @Override public void run() { tickActionBars(); } };
         actionBarTask.runTaskTimer(plugin, 0L, period);
 
@@ -88,6 +89,7 @@ public class GameManager {
                 objectives.stream().map(Enum::name).collect(Collectors.joining(" §7→ §f")));
 
         checkAllActiveInventories();
+        updateBossBars();
     }
 
     public synchronized void forceStopGame(boolean silent) {
@@ -99,18 +101,20 @@ public class GameManager {
         }
         running = false;
         if (!silent) Bukkit.broadcastMessage("§c게임이 종료되었습니다.");
+        clearBossBars();
     }
 
     public synchronized void stopGameWithWinner(TeamManager.Team winTeam) {
         if (finished) return;
-        finished = true; winner = winTeam;
+        finished = true;
+        winner = winTeam;
         if (actionBarTask != null) { actionBarTask.cancel(); actionBarTask = null; }
 
         long now = System.nanoTime();
         endNano.put(winTeam, now);
 
         for (UUID id : team.allPlayers()) {
-            team.getPlayer(id).ifPresent(p -> p.setGameMode(GameMode.ADVENTURE));
+            team.getPlayer(id).ifPresent(p -> p.setGameMode(GameMode.SURVIVAL));
         }
 
         String timeStr = formatElapsed(startNano.get(winTeam), endNano.get(winTeam));
@@ -123,6 +127,7 @@ public class GameManager {
             p.playSound(p.getLocation(), Sound.UI_TOAST_CHALLENGE_COMPLETE, 1f, 1f);
         }
         running = false;
+        clearBossBars();
     }
 
     private void tickActionBars() {
@@ -142,11 +147,10 @@ public class GameManager {
 
     private String formatElapsed(long start, long end) {
         long ns = Math.max(0, end - start);
-        long ms = TimeUnit.NANOSECONDS.toMillis(ns);
+        long ms = java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(ns);
         long minutes = ms / 60000;
         long seconds = (ms % 60000) / 1000;
-        long tenths  = (ms % 1000) / 100;
-        return String.format("%02d:%02d.%d", minutes, seconds, tenths);
+        return String.format("%02d:%02d", minutes, seconds); // mm:ss
     }
 
     private void applyModesForAll() {
@@ -212,7 +216,9 @@ public class GameManager {
 
         // 인벤/장비 전달 (동일 주자라면 전달 생략)
         if (!sameRunner && nextRunnerOpt.isPresent()) {
-            transferInventory(currentRunner, nextRunnerOpt.get());
+            Player next = nextRunnerOpt.get();
+            transferInventory(currentRunner, next);
+            swapLocations(currentRunner, next);
         }
 
         // 모드 전환 (동일 주자면 그대로 유지)
@@ -223,10 +229,25 @@ public class GameManager {
 
         step.put(t, s + 1);
         board.updateAll();
+        updateBossBars();
 
         if (lastObjective) {
             stopGameWithWinner(t);
         }
+    }
+
+    private void swapLocations(Player a, Player b) {
+        Location locA = a.getLocation().clone();
+        Location locB = b.getLocation().clone();
+
+        if (a.isInsideVehicle()) a.leaveVehicle();
+        if (b.isInsideVehicle()) b.leaveVehicle();
+
+        a.setFallDistance(0f);
+        b.setFallDistance(0f);
+
+        a.teleport(locB);
+        b.teleport(locA);
     }
 
     private void transferInventory(Player from, Player to) {
@@ -245,5 +266,69 @@ public class GameManager {
         from.getInventory().setItemInOffHand(null);
         from.updateInventory();
         to.updateInventory();
+    }
+
+    private void updateBossBars() {
+        for (UUID id : team.allPlayers()) {
+            Player p = Bukkit.getPlayer(id);
+            if (p == null) continue;
+
+            TeamManager.Team t = team.getTeam(id);
+            if (t == null) { removeBossBar(id); continue; }
+
+            int s = step.getOrDefault(t, 0);
+            int total = objectives.size();
+
+            // 팀의 "현재" 목표 결정
+            String title;
+            double progress;
+            if (s >= total) {
+                title = "§a모든 목표 완료!";
+                progress = 1.0;
+            } else {
+                Material need = objectives.get(s);
+                title = "§e현재 목표: §f" + need.name() + " §7(" + (s + 1) + "/" + total + ")";
+                // 진행률: 현재 단계/전체
+                progress = Math.min(1.0, (double) s / (double) total);
+            }
+
+            BossBar bar = getOrCreateBossBar(p, t); // 색상(레드/블루) 유지
+            bar.setTitle(title);
+            bar.setProgress(progress);
+            bar.setVisible(true);
+        }
+    }
+
+    /** 보스바 생성/획득 + 색상/스타일/가시성 적용 */
+    private BossBar getOrCreateBossBar(Player p, TeamManager.Team t) {
+        BossBar bar = bossBars.get(p.getUniqueId());
+        BarColor color = (t == TeamManager.Team.RED)
+                ? BarColor.RED : BarColor.BLUE;
+
+        if (bar == null) {
+            bar = Bukkit.createBossBar("목표 대기중", color, BarStyle.SEGMENTED_10);
+            bar.addPlayer(p);
+            bar.setVisible(true);
+            bossBars.put(p.getUniqueId(), bar);
+        } else {
+            if (bar.getColor() != color) bar.setColor(color);
+            if (!bar.getPlayers().contains(p)) bar.addPlayer(p);
+            bar.setVisible(true);
+        }
+        return bar;
+    }
+
+    /** 모든 보스바 제거(게임 종료/강제중지 시) */
+    private void clearBossBars() {
+        for (BossBar bar : bossBars.values()) {
+            bar.removeAll();
+        }
+        bossBars.clear();
+    }
+
+    /** 특정 플레이어 보스바 제거(팀 이탈 등) */
+    private void removeBossBar(UUID id) {
+        BossBar bar = bossBars.remove(id);
+        if (bar != null) bar.removeAll();
     }
 }
