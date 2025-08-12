@@ -1,0 +1,9 @@
+# 팀 릴레이: 아이템 목표(순서대로)
+objectives:
+  - DIAMOND
+  - NETHERITE_INGOT
+  - NETHERITE_SWORD
+  - DRAGON_EGG
+
+# 액션바 업데이트 주기(틱). 10틱=0.5초
+actionbarPeriodTicks: 10
