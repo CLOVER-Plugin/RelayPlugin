@@ -78,6 +78,9 @@ public class GameManager {
 
         applyModesForAll();
 
+        enforceRunnerDoesNotHaveCurrentObjective(TeamManager.Team.RED);
+        enforceRunnerDoesNotHaveCurrentObjective(TeamManager.Team.BLUE);
+
         int period = Math.max(1, plugin.getConfig().getInt("actionbarPeriodTicks", 2));
         actionBarTask = new BukkitRunnable() { @Override public void run() { tickActionBars(); } };
         actionBarTask.runTaskTimer(plugin, 0L, period);
@@ -221,6 +224,8 @@ public class GameManager {
             swapLocations(currentRunner, next);
         }
 
+        enforceNextRunnerDoesNotHaveNextObjective(t, currentRunner, nextRunnerOpt, lastObjective, s);
+
         // 모드 전환 (동일 주자면 그대로 유지)
         if (!sameRunner) {
             currentRunner.setGameMode(GameMode.SPECTATOR);
@@ -330,5 +335,34 @@ public class GameManager {
     private void removeBossBar(UUID id) {
         BossBar bar = bossBars.remove(id);
         if (bar != null) bar.removeAll();
+    }
+
+    /** 현재 팀 주자에게 필요한 '현 단계 목표' 아이템이 이미 있으면 제거 */
+    private void enforceRunnerDoesNotHaveCurrentObjective(TeamManager.Team t) {
+        Material need = getRequired(t);
+        if (need == null) return;
+
+        int runnerIdx = getRunnerIndex(t);
+        team.getPlayerByIndex(t, runnerIdx).ifPresent(p -> {
+            int removed = InventoryUtil.removeAll(p.getInventory(), need);
+            if (removed > 0) {
+                p.updateInventory();
+                p.sendMessage("§e현재 목표 아이템 §f(" + need.name() + ") §e이(가) 인벤토리에 있어 제거되었습니다. 다시 획득하세요!");
+            }
+        });
+    }
+
+    /** 다음 주자가 맡을 '다음 단계 목표' 아이템을 미리 들고 있으면 제거 */
+    private void enforceNextRunnerDoesNotHaveNextObjective(TeamManager.Team t, Player currentRunner, Optional<Player> nextRunnerOpt, boolean lastObjective, int currentStep) {
+        if (lastObjective) return; // 마지막이면 바로 종료되므로 불필요
+        Material nextNeed = objectives.get(currentStep + 1);
+
+        // 다음 주자가 나 자신(1인 팀)일 수도 있음
+        Player target = nextRunnerOpt.orElse(currentRunner);
+        int removed = InventoryUtil.removeAll(target.getInventory(), nextNeed);
+        if (removed > 0) {
+            target.updateInventory();
+            target.sendMessage("§e다음 목표 아이템 §f(" + nextNeed.name() + ") §e이(가) 인벤토리에 있어 제거되었습니다. 다시 획득하세요!");
+        }
     }
 }
