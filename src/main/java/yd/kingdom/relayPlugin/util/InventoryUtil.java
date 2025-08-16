@@ -42,4 +42,42 @@ public class InventoryUtil {
         }
         return list;
     }
+
+    public static int removeAll(PlayerInventory inv, Material mat) {
+        if (mat == null) return 0;
+        int removed = 0;
+
+        // 메인 인벤
+        ItemStack[] contents = inv.getContents();
+        for (int i = 0; i < contents.length; i++) {
+            ItemStack it = contents[i];
+            if (it != null && it.getType() == mat) {
+                removed += it.getAmount();
+                contents[i] = null;
+            }
+        }
+        inv.setContents(contents);
+
+        // 보조손
+        ItemStack off = inv.getItemInOffHand();
+        if (off != null && off.getType() == mat) {
+            removed += off.getAmount();
+            inv.setItemInOffHand(null);
+        }
+
+        // 방어구
+        ItemStack[] arm = inv.getArmorContents();
+        boolean changed = false;
+        for (int i = 0; i < arm.length; i++) {
+            ItemStack it = arm[i];
+            if (it != null && it.getType() == mat) {
+                removed += it.getAmount();
+                arm[i] = null;
+                changed = true;
+            }
+        }
+        if (changed) inv.setArmorContents(arm);
+
+        return removed;
+    }
 }
