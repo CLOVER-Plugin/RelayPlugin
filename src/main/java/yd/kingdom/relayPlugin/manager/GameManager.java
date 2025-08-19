@@ -47,7 +47,7 @@ public class GameManager {
         objectives.clear();
         List<String> list = plugin.getConfig().getStringList("objectives");
         if (list == null || list.isEmpty())
-            list = Arrays.asList("DIAMOND", "NETHERITE_INGOT", "NETHERITE_SWORD", "DRAGON_EGG");
+            list = Arrays.asList("DIAMOND_BLOCK", "TINTED_GLASS", "ENCHANTING_TABLE", "NAME_TAG");
 
         for (String s : list) {
             Material m = Material.matchMaterial(s.trim());
